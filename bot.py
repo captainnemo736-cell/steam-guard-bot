@@ -90,20 +90,20 @@ async def label_autocomplete(interaction: discord.Interaction, current: str):
 @app_commands.describe(label="The account label you gave when adding it")
 @app_commands.autocomplete(label=label_autocomplete)
 async def steamcode(interaction: discord.Interaction, label: str):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer()
     accounts = await load_accounts()
     if label not in accounts:
-        await interaction.followup.send(f"No account found with label `{label}`.", ephemeral=True)
+        await interaction.followup.send(f"No account found with label `{label}`.")
         return
     acc = accounts[label]
     try:
         code = get_steam_guard_code(acc["email"], acc["password"])
         if code:
-            await interaction.followup.send(f"Steam Guard code for `{label}`: **{code}**", ephemeral=True)
+            await interaction.followup.send(f"Steam Guard code for `{label}`: **{code}**")
         else:
-            await interaction.followup.send(f"No unread Steam Guard email found for `{label}`.", ephemeral=True)
+            await interaction.followup.send(f"No unread Steam Guard email found for `{label}`.")
     except RuntimeError as e:
-        await interaction.followup.send(f"Error fetching code: {e}", ephemeral=True)
+        await interaction.followup.send(f"Error fetching code: {e}")
 
 # /addaccount [label] [email] [password]
 @tree.command(name="addaccount", description="Add a Gmail account to fetch Steam Guard codes from")
