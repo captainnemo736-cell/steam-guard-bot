@@ -3,6 +3,8 @@ from discord import app_commands
 import json
 import os
 import asyncpg
+import csv
+import io
 from steam_imap import get_steam_guard_code
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "YOUR_DISCORD_BOT_TOKEN_HERE")
@@ -123,6 +125,36 @@ async def removeaccount(interaction: discord.Interaction, label: str):
         return
     await delete_account(label)
     await interaction.followup.send(f"Account `{label}` removed.", ephemeral=True)
+
+# /importaccounts
+@tree.command(name="importaccounts", description="Bulk import accounts from a CSV file")
+@app_commands.describe(file="A CSV file with columns: label, email, password")
+async def importaccounts(interaction: discord.Interaction, file: discord.Attachment):
+    await interaction.response.defer(ephemeral=True)
+
+    if not file.filename.endswith(".csv"):
+        await interaction.followup.send("Please upload a `.csv` file.", ephemeral=True)
+        return
+
+    content = await file.read()
+    text = content.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(text))
+
+    required = {"label", "email", "password"}
+    if not required.issubset(set(reader.fieldnames or [])):
+        await interaction.followup.send("CSV must have columns: `label`, `email`, `password`", ephemeral=True)
+        return
+
+    count = 0
+    for row in reader:
+        label = row["label"].strip()
+        email = row["email"].strip()
+        password = row["password"].strip()
+        if label and email and password:
+            await save_account(label, email, password)
+            count += 1
+
+    await interaction.followup.send(f"Successfully imported {count} accounts.", ephemeral=True)
 
 # /listaccounts
 @tree.command(name="listaccounts", description="List all saved Gmail account labels")
