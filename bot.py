@@ -2,30 +2,81 @@ import discord
 from discord import app_commands
 import json
 import os
+import psycopg2
 from steam_imap import get_steam_guard_code
 
-DISCORD_TOKEN = "MTQ5MDc0OTUwNTE5NTM0MzkyMw.Gaw6vK.bCactaVlGi-xmN-H01d5qZMJtAVi-ahW309Qp8"
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "YOUR_DISCORD_BOT_TOKEN_HERE")
 ACCOUNTS_FILE = "accounts.json"
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Load accounts from JSON
+# ── Database helpers ──────────────────────────────────────────────────────────
+
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
+
+def init_db():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS accounts (
+                    label TEXT PRIMARY KEY,
+                    email TEXT NOT NULL,
+                    password TEXT NOT NULL
+                )
+            """)
+        conn.commit()
+
+# ── Account storage (JSON locally, DB on Railway) ────────────────────────────
+
 def load_accounts() -> dict:
+    if DATABASE_URL:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT label, email, password FROM accounts")
+                return {row[0]: {"email": row[1], "password": row[2]} for row in cur.fetchall()}
     if not os.path.exists(ACCOUNTS_FILE):
         return {}
     with open(ACCOUNTS_FILE, "r") as f:
         return json.load(f)
 
-# Save accounts to JSON
-def save_accounts(accounts: dict):
-    with open(ACCOUNTS_FILE, "w") as f:
-        json.dump(accounts, f, indent=2)
+def save_account(label: str, email: str, password: str):
+    if DATABASE_URL:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO accounts (label, email, password)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (label) DO UPDATE SET email=EXCLUDED.email, password=EXCLUDED.password
+                """, (label, email, password))
+            conn.commit()
+    else:
+        accounts = load_accounts()
+        accounts[label] = {"email": email, "password": password}
+        with open(ACCOUNTS_FILE, "w") as f:
+            json.dump(accounts, f, indent=2)
 
-# Bot setup
+def delete_account(label: str):
+    if DATABASE_URL:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM accounts WHERE label = %s", (label,))
+            conn.commit()
+    else:
+        accounts = load_accounts()
+        del accounts[label]
+        with open(ACCOUNTS_FILE, "w") as f:
+            json.dump(accounts, f, indent=2)
+
+# ── Bot setup ─────────────────────────────────────────────────────────────────
+
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 @client.event
 async def on_ready():
+    if DATABASE_URL:
+        init_db()
     await tree.sync()
     print(f"Bot is online as {client.user}")
 
@@ -36,7 +87,7 @@ async def label_autocomplete(interaction: discord.Interaction, current: str):
         app_commands.Choice(name=label, value=label)
         for label in accounts
         if current.lower() in label.lower()
-    ][:25]  # Discord limits to 25 choices
+    ][:25]
 
 # /steamcode [label]
 @tree.command(name="steamcode", description="Fetch the latest Steam Guard code for an account")
@@ -45,11 +96,9 @@ async def label_autocomplete(interaction: discord.Interaction, current: str):
 async def steamcode(interaction: discord.Interaction, label: str):
     await interaction.response.defer(ephemeral=True)
     accounts = load_accounts()
-
     if label not in accounts:
-        await interaction.followup.send(f"No account found with label `{label}`. Use `/listaccounts` to see all saved accounts.", ephemeral=True)
+        await interaction.followup.send(f"No account found with label `{label}`.", ephemeral=True)
         return
-
     acc = accounts[label]
     try:
         code = get_steam_guard_code(acc["email"], acc["password"])
@@ -62,18 +111,10 @@ async def steamcode(interaction: discord.Interaction, label: str):
 
 # /addaccount [label] [email] [password]
 @tree.command(name="addaccount", description="Add a Gmail account to fetch Steam Guard codes from")
-@app_commands.describe(
-    label="A short name to identify this account (e.g. acc1)",
-    gmail="The Gmail address",
-    app_password="The Gmail App Password (not your real password)"
-)
+@app_commands.describe(label="A short name to identify this account", gmail="The Gmail address", app_password="The Gmail App Password")
 async def addaccount(interaction: discord.Interaction, label: str, gmail: str, app_password: str):
     await interaction.response.defer(ephemeral=True)
-    accounts = load_accounts()
-
-    accounts[label] = {"email": gmail, "password": app_password}
-    save_accounts(accounts)
-
+    save_account(label, gmail, app_password)
     await interaction.followup.send(f"Account `{label}` saved successfully.", ephemeral=True)
 
 # /removeaccount [label]
@@ -83,13 +124,10 @@ async def addaccount(interaction: discord.Interaction, label: str, gmail: str, a
 async def removeaccount(interaction: discord.Interaction, label: str):
     await interaction.response.defer(ephemeral=True)
     accounts = load_accounts()
-
     if label not in accounts:
         await interaction.followup.send(f"No account found with label `{label}`.", ephemeral=True)
         return
-
-    del accounts[label]
-    save_accounts(accounts)
+    delete_account(label)
     await interaction.followup.send(f"Account `{label}` removed.", ephemeral=True)
 
 # /listaccounts
@@ -97,11 +135,9 @@ async def removeaccount(interaction: discord.Interaction, label: str):
 async def listaccounts(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     accounts = load_accounts()
-
     if not accounts:
         await interaction.followup.send("No accounts saved yet. Use `/addaccount` to add one.", ephemeral=True)
         return
-
     labels = "\n".join(f"• {label} ({acc['email']})" for label, acc in accounts.items())
     await interaction.followup.send(f"Saved accounts:\n{labels}", ephemeral=True)
 
