@@ -92,9 +92,20 @@ async def label_autocomplete(interaction: discord.Interaction, current: str):
 async def steamcode(interaction: discord.Interaction, label: str):
     await interaction.response.defer()
     accounts = await load_accounts()
+
+    # Exact match first
     if label not in accounts:
-        await interaction.followup.send(f"No account found with label `{label}`.")
-        return
+        # Try partial match
+        matches = [l for l in accounts if label.lower() in l.lower()]
+        if len(matches) == 1:
+            label = matches[0]
+        elif len(matches) > 1:
+            options = ", ".join(f"`{m}`" for m in matches)
+            await interaction.followup.send(f"Multiple accounts match `{label}`: {options}. Please be more specific.")
+            return
+        else:
+            await interaction.followup.send(f"No account found matching `{label}`.")
+            return
     acc = accounts[label]
     try:
         code = get_steam_guard_code(acc["email"], acc["password"])
