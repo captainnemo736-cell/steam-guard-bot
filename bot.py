@@ -110,7 +110,7 @@ async def steamcode(interaction: discord.Interaction, label: str):
     try:
         code = get_steam_guard_code(acc["email"], acc["password"])
         if code:
-            await interaction.followup.send(f"Steam Guard code for `{label}`: **{code}**")
+            await interaction.followup.send(f"Steam Guard code for **{label}**:\n```\n{code}\n```")
         else:
             await interaction.followup.send(f"No unread Steam Guard email found for `{label}`.")
     except RuntimeError as e:
