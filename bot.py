@@ -175,7 +175,23 @@ async def listaccounts(interaction: discord.Interaction):
     if not accounts:
         await interaction.followup.send("No accounts saved yet. Use `/addaccount` to add one.", ephemeral=True)
         return
-    labels = "\n".join(f"• {label} ({acc['email']})" for label, acc in accounts.items())
-    await interaction.followup.send(f"Saved accounts:\n{labels}", ephemeral=True)
+    labels = "\n".join(f"• {label}" for label in accounts)
+    # Split into chunks if too long
+    if len(labels) > 1900:
+        chunks = []
+        current = ""
+        for line in labels.split("\n"):
+            if len(current) + len(line) > 1900:
+                chunks.append(current)
+                current = line + "\n"
+            else:
+                current += line + "\n"
+        if current:
+            chunks.append(current)
+        await interaction.followup.send(f"Saved accounts ({len(accounts)} total):\n{chunks[0]}", ephemeral=True)
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk, ephemeral=True)
+    else:
+        await interaction.followup.send(f"Saved accounts ({len(accounts)} total):\n{labels}", ephemeral=True)
 
 client.run(DISCORD_TOKEN)
