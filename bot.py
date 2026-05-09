@@ -194,4 +194,23 @@ async def listaccounts(interaction: discord.Interaction):
     else:
         await interaction.followup.send(f"Saved accounts ({len(accounts)} total):\n{labels}", ephemeral=True)
 
+# /exportaccounts
+@tree.command(name="exportaccounts", description="Export all saved accounts as a CSV file")
+async def exportaccounts(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    accounts = await load_accounts()
+    if not accounts:
+        await interaction.followup.send("No accounts saved yet.", ephemeral=True)
+        return
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["label", "email", "password"])
+    for label, data in accounts.items():
+        writer.writerow([label, data["email"], data["password"]])
+
+    output.seek(0)
+    file = discord.File(fp=io.BytesIO(output.getvalue().encode("utf-8")), filename="accounts.csv")
+    await interaction.followup.send("Here are your exported accounts:", file=file, ephemeral=True)
+
 client.run(DISCORD_TOKEN)
